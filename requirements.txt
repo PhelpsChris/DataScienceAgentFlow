@@ -1,0 +1,11 @@
+# Tested on Python 3.14.6 (also works on 3.12+). Versions pinned to what the tests ran against.
+google-adk==2.14.1
+pandas==3.1.1
+numpy==2.5.4
+scikit-learn==1.9.1
+matplotlib==3.11.2
+reportlab==5.1.0
+openpyxl==3.1.5
+python-dotenv==1.2.4
+google-cloud-storage>=2.18   # only used when OUTPUT_BUCKET is set (Cloud Run)
+pytest==9.2.0

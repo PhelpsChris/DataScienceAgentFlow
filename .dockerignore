@@ -1,0 +1,6 @@
+.venv
+runs
+.env
+agents/data_team/.env
+tests
+__pycache__

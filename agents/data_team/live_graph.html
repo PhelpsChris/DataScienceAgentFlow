@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Agent Graph</title>
+<style>
+  :root {
+    --bg: #121212; --panel: #1b1b1d; --line: #2c2c30; --text: #e6e6e6; --muted: #9a9aa2;
+    --node: #3a3a3d; --node-border: #5a5a60; --edge: #8a93a6;
+    --blue: #3b82f6; --blue-soft: rgba(59,130,246,.35); --ok: #22c55e; --err: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .app { display: flex; height: 100vh; }
+  .chat { flex: 0 0 46%; border-right: 1px solid var(--line); display: none; }
+  .chat iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+  .app.with-chat .chat { display: block; }
+  .app.with-chat .log { display: none; }  /* give the graph the room when the chat is open */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .conn { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .conn.on .dot { background: var(--ok); }
+  .conn.off .dot { background: var(--err); }
+  .spacer { flex: 1; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--node-border); border-radius: 6px;
+    padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--blue); }
+  .status { margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; background: var(--panel);
+    border: 1px solid var(--line); font-size: 15px; min-height: 44px; display: flex; align-items: center; gap: 10px; }
+  .status.busy { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue-soft); }
+  .status code { color: #c7d2fe; }
+  .body { flex: 1; display: flex; min-height: 0; }
+  .canvas { flex: 1; overflow: auto; padding: 12px; display: flex; justify-content: center; align-items: flex-start; }
+  svg { max-width: 100%; height: auto; }
+  .log { flex: 0 0 300px; border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px; font-size: 12.5px; }
+  .log h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 4px 0 8px; }
+  .log ol { list-style: none; margin: 0; padding: 0; }
+  .log li { padding: 5px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; overflow-wrap: anywhere; }
+  .log time { color: var(--muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+  .log .fail { color: var(--err); }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); align-items: center; }
+  .sw { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 2px solid var(--node-border); vertical-align: -1px; margin-right: 4px; }
+  .sw.active { border-color: var(--blue); box-shadow: 0 0 6px var(--blue); }
+  .sw.done { border-color: var(--ok); }
+  @media (max-width: 900px) { .log { display: none; } .app.with-chat .chat { flex-basis: 50%; } }
+
+  /* graph */
+  .node rect { fill: var(--node); stroke: var(--node-border); stroke-width: 1.5; transition: stroke .15s, fill .15s; }
+  .node.tool rect { stroke-dasharray: 5 4; fill: #2f2f32; }
+  .node text { fill: var(--text); font-size: 14px; dominant-baseline: middle; pointer-events: none; }
+  .node .badge { font-size: 11px; fill: #93c5fd; }
+  .node.done rect { stroke: var(--ok); }
+  .node.active rect { stroke: var(--blue); stroke-width: 3.5; stroke-dasharray: none; fill: #1e2a44;
+    filter: drop-shadow(0 0 8px rgba(59,130,246,.9)); animation: pulse 1.2s ease-in-out infinite; }
+  .node.failed rect { stroke: var(--err); }
+  @keyframes pulse { 50% { stroke-opacity: .55; } }
+  .edge { fill: none; stroke: var(--edge); stroke-width: 1.4; opacity: .75; }
+  .edge.tool { stroke-dasharray: 5 4; }
+  .edge.active { stroke: var(--blue); stroke-width: 2.6; opacity: 1; stroke-dasharray: 7 5; animation: flow .6s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -12; } }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="chat"><iframe id="chatFrame" title="ADK chat"></iframe></div>
+  <div class="main">
+    <header>
+      <h1>Live agent graph</h1>
+      <span class="conn" id="conn"><span class="dot"></span><span id="connText">connecting…</span></span>
+      <span class="spacer"></span>
+      <span class="legend"><span><span class="sw active"></span>running now</span><span><span class="sw done"></span>used this turn</span><span><span class="sw" style="border-color:var(--err)"></span>returned an error</span></span>
+      <button id="chatBtn" type="button">Show chat side by side</button>
+    </header>
+    <div class="status" id="status">Waiting for a message…</div>
+    <div class="body">
+      <div class="canvas" id="canvas"><div class="empty">Loading the agent graph…</div></div>
+      <aside class="log"><h2>Activity</h2><ol id="log"></ol></aside>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const CHAT_URL = params.get("chat") || "http://localhost:8000/dev-ui/?app=data_team";
+  const NS = "http://www.w3.org/2000/svg";
+  const AGENT_W = 230, AGENT_H = 48, TOOL_W = 210, TOOL_H = 40, COL_W = 290, TOOL_GAP = 56, PAD = 24;
+
+  let graph = null, pos = {}, nodeEls = {}, edgeEls = [];
+  let state = freshState();
+  let tick = null;
+
+  function freshState() {
+    return { stack: [], thinking: new Set(), tools: new Map(), visited: new Set(), failed: new Set(),
+             toolArgs: new Map(), toolStart: new Map(), lastText: "Waiting for a message…" };
+  }
+
+  // ---------------------------------------------------------------- layout
+  // Agents run left to right along the top (in hand-off order); each agent's tools
+  // hang below it in a column, so labels stay large on a projector.
+  function layout(g) {
+    const byId = Object.fromEntries(g.nodes.map(n => [n.id, n]));
+    const subs = {}, tools = {};
+    g.edges.forEach(e => ((e.kind === "agent" ? subs : tools)[e.from] ||= []).push(e.to));
+    const order = [];
+    (function dfs(a) { order.push(a); (subs[a] || []).forEach(dfs); })(g.root);
+    const placed = new Set();
+    let maxY = 0;
+    order.forEach((a, i) => {
+      const x = PAD + i * COL_W;
+      pos[a] = { x, y: PAD, w: AGENT_W, h: AGENT_H };
+      let y = PAD + AGENT_H + 28;
+      (tools[a] || []).forEach(t => {
+        if (placed.has(t)) return;
+        placed.add(t);
+        pos[t] = { x: x + 34, y, w: TOOL_W, h: TOOL_H };
+        y += TOOL_GAP;
+      });
+      maxY = Math.max(maxY, y);
+    });
+    return { width: PAD * 2 + (order.length - 1) * COL_W + AGENT_W + 10, height: maxY + PAD, byId };
+  }
+
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function draw(g) {
+    const { width, height, byId } = layout(g);
+    const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, width, height, role: "img",
+                            "aria-label": "Agent and tool graph" });
+    const defs = el("defs", {}, svg);
+    for (const [id, color] of [["arrow", "#8a93a6"], ["arrowBlue", "#3b82f6"]]) {
+      const m = el("marker", { id, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7,
+                               orient: "auto-start-reverse" }, defs);
+      el("path", { d: "M0,0 L10,5 L0,10 z", fill: color }, m);
+    }
+    const edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg);
+    g.edges.forEach(e => {
+      const a = pos[e.from], b = pos[e.to];
+      if (!a || !b) return;
+      let d;
+      if (e.kind === "agent") {
+        const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2;
+        d = (Math.abs(x2 - x1) < COL_W) ? `M${x1},${y1} L${x2 - 2},${y2}`
+          : `M${a.x + a.w / 2},${a.y} C${a.x + a.w / 2},${a.y - 30} ${b.x + b.w / 2},${b.y - 30} ${b.x + b.w / 2},${b.y - 2}`;
+      } else {
+        const x1 = a.x + 16, y1 = a.y + a.h, y2 = b.y + b.h / 2;
+        d = (b.x > a.x && b.x < a.x + a.w) ? `M${x1},${y1} L${x1},${y2} L${b.x - 2},${y2}`
+          : `M${a.x + a.w / 2},${y1} L${b.x + b.w / 2},${b.y - 2}`;
+      }
+      const p = el("path", { d, class: `edge ${e.kind}`, "marker-end": "url(#arrow)" }, edgeLayer);
+      edgeEls.push({ ...e, el: p });
+    });
+    g.nodes.forEach(n => {
+      const p = pos[n.id];
+      if (!p) return;
+      const grp = el("g", { class: `node ${n.kind}`, transform: `translate(${p.x},${p.y})` }, nodeLayer);
+      el("rect", { width: p.w, height: p.h, rx: 10 }, grp);
+      const t = el("text", { x: 14, y: p.h / 2 }, grp);
+      t.textContent = (n.kind === "agent" ? "✦  " : "🔧  ") + n.label;
+      const badge = el("text", { x: p.w - 10, y: p.h / 2, class: "badge", "text-anchor": "end" }, grp);
+      const tip = el("title", {}, grp);
+      tip.textContent = n.description || n.label;
+      nodeEls[n.id] = { g: grp, badge, kind: n.kind };
+    });
+    const canvas = document.getElementById("canvas");
+    canvas.innerHTML = "";
+    canvas.appendChild(svg);
+  }
+
+  // ---------------------------------------------------------------- state
+  const label = id => id.split(":")[1];
+  const fmtTime = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  function addLog(ev, html, cls) {
+    const li = document.createElement("li");
+    li.innerHTML = `<time>${fmtTime(ev.t)}</time><span class="${cls || ""}">${html}</span>`;
+    const log = document.getElementById("log");
+    log.prepend(li);
+    while (log.children.length > 200) log.lastChild.remove();
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  function apply(ev) {
+    const s = state;
+    switch (ev.kind) {
+      case "agent_start":
+        if (s.stack.length === 0) { s.visited.clear(); s.failed.clear(); }   // a new turn
+        s.stack.push(ev.node); s.visited.add(ev.node);
+        addLog(ev, `✦ <b>${esc(label(ev.node))}</b> started`);
+        break;
+      case "agent_end":
+        // A hand-off (transfer) never returns to the parent, and ADK does not report the
+        // parent's end, so the first agent_end means the whole turn is over.
+        s.stack = []; s.tools.clear(); s.thinking.clear();
+        addLog(ev, `✦ ${esc(label(ev.node))} finished · turn done`);
+        break;
+      case "model_start": s.thinking.add(ev.node); break;
+      case "model_end": s.thinking.delete(ev.node); break;
+      case "tool_start": {
+        s.tools.set(ev.node, (s.tools.get(ev.node) || 0) + 1);
+        s.toolArgs.set(ev.node, ev.args || {}); s.toolStart.set(ev.node, ev.t);
+        s.visited.add(ev.node); s.failed.delete(ev.node);
+        const args = Object.entries(ev.args || {}).map(([k, v]) => `${k}=${v}`).join(", ");
+        addLog(ev, `🔧 <b>${esc(label(ev.node))}</b>(${esc(args)})`);
+        break;
+      }
+      case "tool_end": {
+        const n = (s.tools.get(ev.node) || 1) - 1;
+        if (n <= 0) s.tools.delete(ev.node); else s.tools.set(ev.node, n);
+        const secs = s.toolStart.has(ev.node) ? (ev.t - s.toolStart.get(ev.node)).toFixed(1) + "s" : "";
+        if (ev.ok === false) s.failed.add(ev.node);
+        addLog(ev, `${ev.ok === false ? "✗" : "✓"} ${esc(label(ev.node))} ${secs}`, ev.ok === false ? "fail" : "");
+        break;
+      }
+    }
+  }
+
+  function render() {
+    if (!graph) return;
+    const s = state;
+    const current = s.stack[s.stack.length - 1];
+    const runningTools = [...s.tools.keys()];
+    for (const [id, n] of Object.entries(nodeEls)) {
+      let cls = `node ${n.kind}`;
+      if (s.tools.has(id) || id === current) cls += " active";
+      else if (s.failed.has(id)) cls += " failed";
+      else if (s.visited.has(id)) cls += " done";
+      n.g.setAttribute("class", cls);
+      n.badge.textContent = (id === current && s.thinking.has(id) && !runningTools.length) ? "thinking…"
+        : (s.tools.has(id) ? `${(Date.now() / 1000 - s.toolStart.get(id)).toFixed(1)}s` : "");
+    }
+    const activeEdges = new Set();
+    if (runningTools.length) runningTools.forEach(t => activeEdges.add(current + ">" + t));
+    else if (s.stack.length > 1) activeEdges.add(s.stack[s.stack.length - 2] + ">" + current);  // just handed off
+    edgeEls.forEach(e => {
+      const on = activeEdges.has(e.from + ">" + e.to);
+      e.el.setAttribute("class", `edge ${e.kind}${on ? " active" : ""}`);
+      e.el.setAttribute("marker-end", on ? "url(#arrowBlue)" : "url(#arrow)");
+    });
+    const st = document.getElementById("status");
+    let html;
+    if (runningTools.length) {
+      const t = runningTools[runningTools.length - 1];
+      const args = Object.entries(s.toolArgs.get(t) || {}).map(([k, v]) => `${k}=${esc(v)}`).join(", ");
+      html = `<b>${esc(label(current || ""))}</b> is running <code>${esc(label(t))}(${args})</code>`;
+    } else if (current && s.thinking.has(current)) {
+      html = `<b>${esc(label(current))}</b> is thinking (calling Gemini)…`;
+    } else if (current) {
+      html = `<b>${esc(label(current))}</b> is active`;
+    } else {
+      html = s.visited.size ? "Turn finished. Waiting for the next message…" : "Waiting for a message…";
+    }
+    st.innerHTML = html;
+    st.classList.toggle("busy", !!current);
+    if ((runningTools.length || current) && !tick) tick = setInterval(render, 200);
+    if (!runningTools.length && !current && tick) { clearInterval(tick); tick = null; }
+  }
+
+  // ---------------------------------------------------------------- wiring
+  function setConn(on, text) {
+    const c = document.getElementById("conn");
+    c.className = "conn " + (on ? "on" : "off");
+    document.getElementById("connText").textContent = text;
+  }
+
+  async function loadGraph() {
+    try {
+      const g = await (await fetch("graph.json", { cache: "no-store" })).json();
+      if (!g.nodes || !g.nodes.length) throw new Error("empty");
+      graph = g; pos = {}; nodeEls = {}; edgeEls = [];
+      draw(g); render();
+    } catch (e) {
+      document.getElementById("canvas").innerHTML = '<div class="empty">Waiting for the agents to load…</div>';
+      setTimeout(loadGraph, 1500);
+    }
+  }
+
+  function connect() {
+    const es = new EventSource("events");
+    es.onopen = () => { state = freshState(); document.getElementById("log").innerHTML = ""; setConn(true, "live"); };
+    es.onmessage = m => { apply(JSON.parse(m.data)); render(); };
+    es.onerror = () => setConn(false, "disconnected, retrying…");
+  }
+
+  document.getElementById("chatBtn").addEventListener("click", () => {
+    const app = document.getElementById("app"), f = document.getElementById("chatFrame");
+    const on = !app.classList.contains("with-chat");
+    if (on && !f.src) f.src = CHAT_URL;
+    app.classList.toggle("with-chat", on);
+    document.getElementById("chatBtn").textContent = on ? "Hide chat" : "Show chat side by side";
+  });
+  if (params.get("split") === "1") document.getElementById("chatBtn").click();
+
+  loadGraph();
+  connect();
+})();
+</script>
+</body>
+</html>

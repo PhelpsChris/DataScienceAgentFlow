@@ -1,0 +1,13 @@
+﻿.env
+agents/data_team/.env
+.venv/
+__pycache__/
+.pytest_cache/
+runs/
+agents/*/.adk/
+*.pyc
+.DS_Store
+*.swp
+*.swo
+.env.*
+!.env.example
