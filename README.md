@@ -16,6 +16,14 @@ Python tools**, so a live demo behaves the same way every time. Diagrams are in
 
 ![AI Data Team architecture (UML)](docs/architecture_uml.png)
 
+**Goals that need a new column.** If no single column answers the question, the
+Verify Agent calls `create_target` to work one out from existing columns, e.g.
+"who passes?" → `passed = G3 >= 10`, "who improved?" → `improvement = G3 - G1`,
+"total drinking" → `Dalc + Walc`. Formulas may only use column names, numbers,
+`+ - * / ( )`, comparisons and `and`/`or` (no code). The columns the target is
+built from are removed from the features so the model can't just recompute the
+answer, and the rule is written into `usergoal.txt` and the report.
+
 ---
 
 ## 1. Setup (about 5 minutes)
