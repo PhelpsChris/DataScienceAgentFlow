@@ -129,90 +129,6 @@ def _match_column(df: pd.DataFrame, name: str) -> str | None:
     return None
 
 
-_FORMULA_TOKEN = re.compile(
-    r"\s*(?:(?P<num>\d+(?:\.\d+)?)|(?P<str>'[^'\\`]{0,60}')|(?P<op>==|!=|>=|<=|[-+*/()<>&|])"
-    r"|(?P<name>`[^`]{1,60}`|[A-Za-z_][A-Za-z0-9_.]*))"
-)
-_KEYWORDS = {"and": "&", "or": "|"}
-
-
-def _parse_formula(df: pd.DataFrame, formula: str) -> tuple[str, list[str]]:
-    """Check a formula token by token: only column names, numbers, 'quoted text' and
-    arithmetic/comparison operators are allowed (no function calls or attribute
-    access). Returns the pandas expression and the columns it uses."""
-    out, used, pos = [], [], 0
-    formula = formula.strip()
-    while pos < len(formula):
-        m = _FORMULA_TOKEN.match(formula, pos)
-        if not m or m.end() == pos:
-            raise ValueError(f"Can't read the formula near '{formula[pos:pos + 15]}'. Use column names, "
-                             "numbers, + - * / ( ) and comparisons like >= or ==.")
-        pos = m.end()
-        if m.group("name"):
-            raw = m.group("name").strip("`")
-            if raw.lower() in _KEYWORDS:
-                out.append(_KEYWORDS[raw.lower()])
-                continue
-            col = _match_column(df, raw)
-            if col is None:
-                raise ValueError(f"There is no column called '{raw}'. Columns are: {', '.join(map(str, df.columns))}.")
-            used.append(col)
-            out.append(f"`{col}`")
-        else:
-            out.append(next(v for v in m.groupdict().values() if v))
-    if not used:
-        raise ValueError("The formula must use at least one column.")
-    return " ".join(out), list(dict.fromkeys(used))
-
-
-def create_target(run_dir: Path, new_column: str, formula: str, labels: str = "") -> dict:
-    """Add a column worked out from existing ones (e.g. pass = G3 >= 10,
-    improvement = G3 - G1) so it can be used as the goal's target. The columns it is
-    built from are recorded and later left out of the features, so the model can't
-    just copy the answer."""
-    p = Path(run_dir) / "dataset.csv"
-    if not p.exists():
-        return {"ok": False, "message": "No dataset has been loaded yet."}
-    df = pd.read_csv(p)
-    name = re.sub(r"[^A-Za-z0-9_]+", "_", new_column.strip()).strip("_")[:40]
-    if not name:
-        return {"ok": False, "message": "Give the new column a short name, e.g. 'passed'."}
-    if name in df.columns:
-        return {"ok": False, "message": f"A column called '{name}' already exists; pick another name or use it directly."}
-    try:
-        expr, used = _parse_formula(df, formula)
-        values = df.eval(expr, engine="python")
-    except Exception as e:  # noqa: BLE001 - explained back to the LLM
-        return {"ok": False, "message": f"Could not build '{name}': {e}"}
-    if not isinstance(values, pd.Series) or len(values) != len(df):
-        return {"ok": False, "message": "The formula must give one value per row."}
-    if pd.api.types.is_bool_dtype(values):
-        yes, no = ([s.strip() for s in labels.split(",")] + ["", ""])[:2] if labels else ("", "")
-        yes, no = yes or "yes", no or "no"
-        values = values.map({True: yes, False: no})
-        kind = f"yes/no label ('{yes}' when {formula.strip()}, otherwise '{no}')"
-    elif pd.api.types.is_numeric_dtype(values):
-        values = values.round(4)
-        kind = "number"
-    else:
-        return {"ok": False, "message": "The formula must give a number or a true/false comparison."}
-    df[name] = values
-    df.to_csv(p, index=False)
-
-    derived = json.loads(_read(run_dir, "derived_targets.json") or "{}")
-    derived[name] = {"formula": formula.strip(), "source_columns": used, "kind": kind}
-    _write(run_dir, "derived_targets.json", json.dumps(derived, indent=2))
-    counts = values.value_counts().head(5).to_dict() if kind != "number" else {
-        "min": float(values.min()), "mean": round(float(values.mean()), 3), "max": float(values.max())}
-    note = (f"\nDERIVED COLUMN\n- {name} = {formula.strip()} ({kind}); built from {', '.join(used)}, "
-            "which will be left out of the model's features.\n")
-    with open(Path(run_dir) / "dataVerified.txt", "a", encoding="utf-8") as f:
-        f.write(note)
-    return {"ok": True, "new_column": name, "formula": formula.strip(), "kind": kind,
-            "source_columns": used, "summary": {str(k): v for k, v in counts.items()},
-            "message": f"Added '{name}'. Now call check_goal('{name}')."}
-
-
 def check_goal(run_dir: Path, target_column: str = "") -> dict:
     """Deterministic feasibility check: does the target exist and is it usable?"""
     p = Path(run_dir) / "dataset.csv"
@@ -252,18 +168,9 @@ def confirm_goal(run_dir: Path, goal: str, target_column: str) -> dict:
         return chk
     data = {"goal": goal.strip() or "Explain the whole dataset", "target_column": chk["target_column"],
             "task": chk["task"], "confirmed_at": datetime.now().isoformat(timespec="seconds")}
-    derived = json.loads(_read(run_dir, "derived_targets.json") or "{}").get(chk["target_column"])
-    if derived:
-        if derived["kind"] == "number":  # e.g. Dalc + Walc: a quantity, even with few distinct values
-            data["task"] = "regression"
-        data["derived_from"] = derived["formula"]
-        data["source_columns"] = derived["source_columns"]
     (Path(run_dir) / "usergoal.json").write_text(json.dumps(data, indent=2))
-    text = f"User goal: {data['goal']}\nTarget column: {data['target_column']}\nTask type: {data['task']}\n"
-    if derived:
-        text += (f"Target is a derived column: {data['target_column']} = {derived['formula']}\n"
-                 f"Columns it was built from (left out of the features): {', '.join(derived['source_columns'])}\n")
-    _write(run_dir, "usergoal.txt", text)
+    _write(run_dir, "usergoal.txt", f"User goal: {data['goal']}\nTarget column: {data['target_column']}\n"
+           f"Task type: {data['task']}\n")
     _write(run_dir, "verify_payload.json", json.dumps(
         {"payload": ["user_responses.txt", "dataVerified.txt", "usergoal.txt", "dataset.csv"]}, indent=2))
     return {"ok": True, **data}
@@ -281,12 +188,7 @@ def goal(run_dir: Path) -> dict:
 def clean_dataset(run_dir: Path, drop_columns: list[str] | None = None) -> dict:
     g = goal(run_dir)
     df = pd.read_csv(Path(run_dir) / "dataset.csv")
-    src = [c for c in g.get("source_columns", []) if c != g["target_column"]]
-    drop = list(dict.fromkeys([*(drop_columns or []), *src]))
-    clean_df, log = cleaning.clean(df, g["target_column"], drop)
-    if src:
-        log.append(f"The target '{g['target_column']}' is worked out from {', '.join(src)}, so those columns "
-                   "were removed from the features (otherwise the model could just recompute the answer).")
+    clean_df, log = cleaning.clean(df, g["target_column"], drop_columns)
     clean_df.to_csv(Path(run_dir) / "dataset_clean.csv", index=False)
     _write(run_dir, "dataset_changes.txt", "DATASET CHANGES\n===============\n" + "\n".join(f"- {l}" for l in log))
     suspects = modeling.leakage_suspects(clean_df, g["target_column"])

@@ -23,13 +23,6 @@ How to work:
    final grade G3" or "Which 3 features have the most impact on performance?".
 4. Decide whether the dataset can support the goal:
    - Map the goal to ONE target column, then call `check_goal(target_column)`.
-   - If no single column answers it but one can be worked out from existing columns
-     (pass/fail from a grade, a change between two columns, a total), call
-     `create_target(new_column, formula, labels)` first, e.g.
-     ("passed", "G3 >= 10", "pass,fail"), ("improvement", "G3 - G1"),
-     ("total_alcohol", "Dalc + Walc"), then `check_goal` on the new column. Tell the
-     user the rule you used in one sentence, and that the columns it was built from
-     are left out of the model so it can't just copy the answer.
    - If the user has no goal ("I don't know", "explain the whole dataset"), call
      `check_goal("")` to use the default target and goal "Explain the whole dataset".
    - If the goal is not something this data can answer (e.g. "make me a millionaire

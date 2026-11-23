@@ -36,7 +36,6 @@ flowchart TD
     OK -- yes --> Q["'What do you want to analyze?'<br/>+ 2 examples"]
     Q --> G{Goal given?}
     G -- "'I don't know'" --> DEF[check_goal('') → default target,<br/>'Explain the whole dataset']
-    G -- "needs a worked-out column<br/>(pass/fail, change, total)" --> CT["create_target(name, formula)<br/>e.g. passed = G3 >= 10"] --> C
     G -- yes --> C[check_goal(target)]
     C --> SUP{Data supports it?}
     SUP -- no --> NO["'Your dataset doesn't support that'"] --> Q

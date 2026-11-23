@@ -61,8 +61,7 @@ verify_agent = LlmAgent(
     model=MODEL,
     description="Greets the user, loads and checks their dataset, and agrees on the analysis goal.",
     instruction=VERIFY_PROMPT,
-    tools=[tools.list_sample_datasets, tools.load_dataset, tools.check_goal, tools.create_target,
-           tools.confirm_goal],
+    tools=[tools.list_sample_datasets, tools.load_dataset, tools.check_goal, tools.confirm_goal],
     sub_agents=[data_science_agent],
     **COMMON_CALLBACKS,
 )
