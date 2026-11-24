@@ -66,6 +66,23 @@ def check_goal(target_column: str, tool_context: ToolContext) -> dict:
         return _err(e)
 
 
+def create_target(new_column: str, formula: str, tool_context: ToolContext, labels: str = "") -> dict:
+    """Adds a new column worked out from existing columns, for goals that no single
+    column answers (pass/fail, improvement, totals). Then use it with check_goal.
+
+    Args:
+      new_column: short name for the new column, e.g. "passed" or "improvement".
+      formula: built from column names, numbers, + - * / ( ) and comparisons
+        (>, >=, <, <=, ==, !=, combined with "and"/"or"). Examples: "G3 >= 10",
+        "G3 - G1", "Dalc + Walc", "quality >= 7". Text values go in single quotes.
+      labels: for a comparison, the two labels "true,false", e.g. "pass,fail".
+    """
+    try:
+        return pipeline.create_target(_run(tool_context), new_column, formula, labels)
+    except Exception as e:  # noqa: BLE001
+        return _err(e)
+
+
 def confirm_goal(goal: str, target_column: str, tool_context: ToolContext) -> dict:
     """Saves the agreed goal to usergoal.txt and hands off to the Data Science Agent.
 
