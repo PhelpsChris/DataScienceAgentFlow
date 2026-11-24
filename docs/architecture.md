@@ -45,7 +45,7 @@ flowchart TD
     CG --> DS([Data Science Agent])
 ```
 
-## 3. Data Science Agent steps (all fixed, tested tools)
+## 3. Data Science Agent steps (all fixed, deterministic tools)
 
 ```mermaid
 flowchart TD

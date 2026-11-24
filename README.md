@@ -9,7 +9,7 @@ produce a PDF analysis report:
 | **Data Science Agent** | Cleans the data, trains 3 candidate models, picks the winner, measures feature importance, makes charts | `dataset_changes.txt`, `model_selection_why.txt`, `metrics.json`, `charts/`, `report_agent_package.txt` |
 | **Report Agent** | Reads only the package and writes Executive Summary, Methodology, Findings, Limitations, Recommendations | `report.pdf` |
 
-The agents decide *what* to do; the data work is done by **fixed, unit-tested
+The agents decide *what* to do; the data work is done by **fixed, deterministic
 Python tools**, so a live demo behaves the same way every time. Diagrams are in
 [docs/architecture.md](docs/architecture.md) (Mermaid; paste into
 <https://mermaid.live> to export PNGs for slides).
@@ -53,7 +53,6 @@ cp .env.example agents/data_team/.env
 Check everything works without using the API:
 
 ```bash
-pytest -q                                         # 28 tests, ~1 minute
 python scripts/run_offline.py --data student --target G3
 ```
 
@@ -152,7 +151,6 @@ agents/data_team/
 scripts/run_offline.py   whole workflow without Gemini (testing / backup)
 scripts/web_with_graph.py   adk web + live agent graph in one command
 scripts/live_graph_demo.py  rehearse the live graph with a scripted Gemini (no key needed)
-tests/                   unit tests on the real datasets + scripted end-to-end agent test
 ```
 
 **How the hand-offs work (agent.py, tools.py).** `verify_agent` is the root
@@ -180,7 +178,7 @@ parent agent never reports its own end, so the page treats the first
 **Why fixed tools instead of letting the LLM write code.** Generated code can
 crash live and gives different answers each run. Here the LLM chooses the
 target, which columns to drop, and whether to run a second scenario; the code
-that cleans, trains and plots is the same every time and is covered by tests.
+that cleans, trains and plots is the same every time.
 
 **Model selection (core/modeling.py).**
 - *Task*: category target, or a number with ≤ 10 distinct values → classification; otherwise regression.
